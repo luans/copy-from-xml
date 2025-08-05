@@ -1,0 +1,5 @@
+<config>
+  <db>
+    <host>localhost</host>
+  </db>
+</config>
