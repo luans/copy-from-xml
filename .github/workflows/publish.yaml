@@ -2,12 +2,110 @@ name: Publish to NPM
 
 on:
   push:
+    branches: [main, master]
     tags:
       - 'v*'
 
 jobs:
-  publish:
+  version-and-publish:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build package
+        run: npm run build
+
+      - name: Get conventional commit message for versioning
+        id: get_version
+        run: |
+          # Analisa as mensagens de commit desde a última tag
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          COMMITS_SINCE_TAG=$(git log --oneline $LATEST_TAG..HEAD --format=%s)
+          
+          # Determina o tipo de bump baseado nos commits
+          if echo "$COMMITS_SINCE_TAG" | grep -qE "^(feat|feature)(\(.*\))?:"; then
+            echo "BUMP_TYPE=minor" >> $GITHUB_OUTPUT
+          elif echo "$COMMITS_SINCE_TAG" | grep -qE "^(fix|perf|style)(\(.*\))?:"; then
+            echo "BUMP_TYPE=patch" >> $GITHUB_OUTPUT
+          elif echo "$COMMITS_SINCE_TAG" | grep -qE "^(BREAKING CHANGE|break|breaking)(\(.*\))?:"; then
+            echo "BUMP_TYPE=major" >> $GITHUB_OUTPUT
+          else
+            echo "BUMP_TYPE=patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump version and create tag
+        id: bump_version
+        run: |
+          # Pega a versão atual do package.json
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          
+          # Determina a nova versão baseada no tipo de bump
+          BUMP_TYPE=${{ steps.get_version.outputs.BUMP_TYPE }}
+          
+          IFS='.' read -r major minor patch <<< "$CURRENT_VERSION"
+          
+          case $BUMP_TYPE in
+            "major")
+              NEW_VERSION="$((major + 1)).0.0"
+              ;;
+            "minor")
+              NEW_VERSION="$major.$((minor + 1)).0"
+              ;;
+            "patch")
+              NEW_VERSION="$major.$minor.$((patch + 1))"
+              ;;
+            *)
+              NEW_VERSION="$major.$minor.$((patch + 1))"
+              ;;
+          esac
+          
+          # Atualiza a versão no package.json
+          npm version $NEW_VERSION --no-git-tag-version
+          
+          # Cria a tag
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add package.json
+          git commit -m "chore(release): bump version to $NEW_VERSION"
+          git tag -a "v$NEW_VERSION" -m "Release version $NEW_VERSION"
+          git push origin "v$NEW_VERSION"
+          git push origin HEAD:main
+          
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Publish to NPM
+        run: npm publish --access=public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Generate Changelog
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: update changelog'
+          file_pattern: CHANGELOG.md
+          branch: main
+
+  # Job separado para publicação quando uma tag é pushada
+  publish-on-tag:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: version-and-publish
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -33,10 +131,3 @@ jobs:
         run: npm publish --access=public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Generate Changelog
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: 'chore: update changelog'
-          file_pattern: CHANGELOG.md
-          branch: main
