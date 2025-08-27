@@ -22,8 +22,13 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (with package-lock check)
+        run: |
+          if [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Run tests
         run: npm test
@@ -36,18 +41,19 @@ jobs:
         run: |
           # Analisa as mensagens de commit desde a última tag
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          COMMITS_SINCE_TAG=$(git log --oneline $LATEST_TAG..HEAD --format=%s)
+          COMMITS_SINCE_TAG=$(git log --oneline $LATEST_TAG..HEAD --format=%s || echo "")
           
           # Determina o tipo de bump baseado nos commits
           if echo "$COMMITS_SINCE_TAG" | grep -qE "^(feat|feature)(\(.*\))?:"; then
             echo "BUMP_TYPE=minor" >> $GITHUB_OUTPUT
-          elif echo "$COMMITS_SINCE_TAG" | grep -qE "^(fix|perf|style)(\(.*\))?:"; then
-            echo "BUMP_TYPE=patch" >> $GITHUB_OUTPUT
           elif echo "$COMMITS_SINCE_TAG" | grep -qE "^(BREAKING CHANGE|break|breaking)(\(.*\))?:"; then
             echo "BUMP_TYPE=major" >> $GITHUB_OUTPUT
+          elif echo "$COMMITS_SINCE_TAG" | grep -qE "^(fix|perf|style)(\(.*\))?:"; then
+            echo "BUMP_TYPE=patch" >> $GITHUB_OUTPUT
           else
             echo "BUMP_TYPE=patch" >> $GITHUB_OUTPUT
           fi
+          echo "BUMP_TYPE=$BUMP_TYPE" >> $GITHUB_OUTPUT
 
       - name: Bump version and create tag
         id: bump_version
@@ -78,34 +84,34 @@ jobs:
           # Atualiza a versão no package.json
           npm version $NEW_VERSION --no-git-tag-version
           
-          # Cria a tag
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add package.json
+          # Atualiza o package-lock.json se existir
+          if [ -f "package-lock.json" ]; then
+            npm install --package-lock-only
+          fi
+          
+          # Cria a tag e faz push
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .
           git commit -m "chore(release): bump version to $NEW_VERSION"
           git tag -a "v$NEW_VERSION" -m "Release version $NEW_VERSION"
           git push origin "v$NEW_VERSION"
-          git push origin HEAD:main
+          git push origin HEAD:${{ github.ref_name }}
           
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Publish to NPM
-        run: npm publish --access=public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Generate Changelog
+      - name: Generate Changelog (optional)
+        if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'chore: update changelog'
           file_pattern: CHANGELOG.md
-          branch: main
+          branch: ${{ github.ref_name }}
 
-  # Job separado para publicação quando uma tag é pushada
+  # Job para publicação quando uma tag é pushada
   publish-on-tag:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: version-and-publish
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -118,8 +124,13 @@ jobs:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install dependencies (with package-lock check)
+        run: |
+          if [ -f "package-lock.json" ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Run tests
         run: npm test
