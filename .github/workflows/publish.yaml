@@ -14,7 +14,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Clean dist directory
+        run: |
+          if [ -d "dist" ]; then
+            rm -rf dist/*
+            echo "Cleaned dist directory"
+          else
+            echo "dist directory does not exist, creating it"
+            mkdir dist
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -53,7 +63,6 @@ jobs:
           else
             echo "BUMP_TYPE=patch" >> $GITHUB_OUTPUT
           fi
-          echo "BUMP_TYPE=$BUMP_TYPE" >> $GITHUB_OUTPUT
 
       - name: Bump version and create tag
         id: bump_version
@@ -117,6 +126,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Clean dist directory
+        run: |
+          if [ -d "dist" ]; then
+            rm -rf dist/*
+            echo "Cleaned dist directory"
+          else
+            echo "dist directory does not exist, creating it"
+            mkdir dist
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
